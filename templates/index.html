@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Transcript Summarizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 28px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        select {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+            min-width: 180px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .content-section {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .content-section.active {
+            display: block;
+        }
+
+        .summary-box {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .chat-container {
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            height: 400px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #fafafa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 6px;
+            max-width: 80%;
+        }
+
+        .message.user {
+            background: #667eea;
+            color: white;
+            margin-left: auto;
+        }
+
+        .message.assistant {
+            background: white;
+            border: 1px solid #e0e0e0;
+        }
+
+        .thinking-section {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 10px;
+            margin-top: 5px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #856404;
+        }
+
+        .thinking-header {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .chat-input-group {
+            display: flex;
+            gap: 10px;
+            padding: 15px;
+            border-top: 2px solid #e0e0e0;
+        }
+
+        .chat-input-group input {
+            flex: 1;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .streaming-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1em;
+            background: #667eea;
+            margin-left: 2px;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 49% { opacity: 1; }
+            50%, 100% { opacity: 0; }
+        }
+
+        .update-banner {
+            background: #d1ecf1;
+            border: 1px solid #17a2b8;
+            color: #0c5460;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .update-banner.show {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .update-banner strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .update-banner .update-info {
+            flex: 1;
+        }
+
+        .update-banner button {
+            background: #17a2b8;
+            margin-left: 15px;
+            white-space: nowrap;
+        }
+
+        .update-banner button:hover {
+            background: #138496;
+        }
+
+        .thinking-content {
+            margin-top: 5px;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .prompt-settings {
+            margin-top: 30px;
+            border-top: 2px solid #e0e0e0;
+            padding-top: 20px;
+        }
+
+        .prompt-settings-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .prompt-settings-header:hover {
+            background: #e9ecef;
+        }
+
+        .prompt-settings-header h3 {
+            margin: 0;
+            color: #333;
+        }
+
+        .prompt-settings-toggle {
+            font-size: 18px;
+            transition: transform 0.3s;
+        }
+
+        .prompt-settings-toggle.open {
+            transform: rotate(180deg);
+        }
+
+        .prompt-settings-content {
+            display: none;
+        }
+
+        .prompt-settings-content.open {
+            display: block;
+        }
+
+        .prompt-group {
+            margin-bottom: 20px;
+        }
+
+        .prompt-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .prompt-group small {
+            display: block;
+            color: #666;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+
+        .prompt-group textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            resize: vertical;
+        }
+
+        .prompt-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .prompt-reset-btn {
+            background: #6c757d;
+            font-size: 12px;
+            padding: 8px 16px;
+            margin-top: 10px;
+        }
+
+        .prompt-reset-btn:hover {
+            background: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Transcript Summarizer</h1>
+
+        <div id="updateBanner" class="update-banner"></div>
+
+        <div class="input-group">
+            <input type="text" id="youtubeUrl" placeholder="Enter YouTube URL...">
+            <select id="modelSelect">
+                <option value="qwen2.5:latest">qwen2.5:latest</option>
+            </select>
+            <button id="fetchBtn" onclick="fetchTranscript()">Get Transcript</button>
+        </div>
+
+        <div id="status" class="status"></div>
+
+        <div id="contentSection" class="content-section">
+            <div class="button-group">
+                <button id="summaryBtn" onclick="generateSummary()">Generate Summary</button>
+                <button onclick="downloadTranscript()">Download Transcript</button>
+            </div>
+
+            <div id="summarySection" style="margin-top: 20px; display: none;">
+                <h3 style="margin-bottom: 10px;">Summary:</h3>
+                <div id="summary" class="summary-box"></div>
+            </div>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <h3 style="margin-bottom: 10px;">Chat <span id="chatMode" style="font-size: 14px; color: #666;">(General)</span>:</h3>
+            <div class="chat-container">
+                <div id="chatMessages" class="chat-messages"></div>
+                <div class="chat-input-group">
+                    <input type="text" id="chatInput" placeholder="Ask a question...">
+                    <button id="chatBtn" onclick="sendChat()">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="prompt-settings">
+            <div class="prompt-settings-header" onclick="togglePromptSettings()">
+                <h3>Prompt Settings</h3>
+                <span id="promptToggle" class="prompt-settings-toggle">▼</span>
+            </div>
+            <div id="promptSettingsContent" class="prompt-settings-content">
+                <div class="prompt-group">
+                    <label>Summary Prompt</label>
+                    <small>Use <code>{transcript}</code> as placeholder for the transcript text</small>
+                    <textarea id="summaryPrompt">Please provide a concise summary of the following transcript:
+
+{transcript}
+
+Summary:</textarea>
+                </div>
+
+                <div class="prompt-group">
+                    <label>Chat Prompt (with Transcript)</label>
+                    <small>Use <code>{transcript}</code> for transcript and <code>{message}</code> for user message</small>
+                    <textarea id="chatTranscriptPrompt">You are a helpful assistant analyzing a YouTube video transcript. Here is the transcript:
+
+{transcript}
+
+User question: {message}
+
+Answer:</textarea>
+                </div>
+
+                <div class="prompt-group">
+                    <label>Chat Prompt (General)</label>
+                    <small>Use <code>{message}</code> as placeholder for user message</small>
+                    <textarea id="chatGeneralPrompt">You are a helpful AI assistant. Please answer the following question:
+
+{message}
+
+Answer:</textarea>
+                </div>
+
+                <button class="prompt-reset-btn" onclick="resetPrompts()">Reset to Defaults</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTranscript = '';
+        let currentEventSource = null;
+
+        // Default prompts for reset
+        const defaultPrompts = {
+            summary: `Please provide a concise summary of the following transcript:
+
+{transcript}
+
+Summary:`,
+            chatTranscript: `You are a helpful assistant analyzing a YouTube video transcript. Here is the transcript:
+
+{transcript}
+
+User question: {message}
+
+Answer:`,
+            chatGeneral: `You are a helpful AI assistant. Please answer the following question:
+
+{message}
+
+Answer:`
+        };
+
+        function togglePromptSettings() {
+            const content = document.getElementById('promptSettingsContent');
+            const toggle = document.getElementById('promptToggle');
+            content.classList.toggle('open');
+            toggle.classList.toggle('open');
+        }
+
+        function resetPrompts() {
+            document.getElementById('summaryPrompt').value = defaultPrompts.summary;
+            document.getElementById('chatTranscriptPrompt').value = defaultPrompts.chatTranscript;
+            document.getElementById('chatGeneralPrompt').value = defaultPrompts.chatGeneral;
+        }
+
+        // Load available models
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/models');
+                const data = await response.json();
+                const select = document.getElementById('modelSelect');
+                select.innerHTML = data.models.map(model =>
+                    `<option value="${model}">${model}</option>`
+                ).join('');
+            } catch (error) {
+                console.error('Failed to load models:', error);
+            }
+        }
+
+        // Check for updates
+        async function checkForUpdates() {
+            try {
+                const response = await fetch('/api/updates');
+                const data = await response.json();
+
+                if (data.has_updates) {
+                    const banner = document.getElementById('updateBanner');
+                    const updateList = data.updates.map(pkg =>
+                        `${pkg.name}: ${pkg.version} → ${pkg.latest_version}`
+                    ).join(', ');
+                    banner.innerHTML = `
+                        <div class="update-info">
+                            <strong>📦 Updates Available!</strong>
+                            ${updateList}
+                        </div>
+                        <button onclick="updatePackages()">Update Now</button>
+                    `;
+                    banner.classList.add('show');
+                }
+            } catch (error) {
+                console.error('Failed to check updates:', error);
+            }
+        }
+
+        // Update packages
+        async function updatePackages() {
+            const banner = document.getElementById('updateBanner');
+            const btn = banner.querySelector('button');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Updating...';
+
+            try {
+                const response = await fetch('/api/update-packages', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    banner.innerHTML = `
+                        <div class="update-info">
+                            <strong>✅ ${data.message}</strong>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        banner.classList.remove('show');
+                    }, 5000);
+                } else {
+                    banner.innerHTML = `
+                        <div class="update-info">
+                            <strong>❌ Update Failed:</strong> ${data.message}
+                        </div>
+                        <button onclick="updatePackages()">Retry</button>
+                    `;
+                }
+            } catch (error) {
+                banner.innerHTML = `
+                    <div class="update-info">
+                        <strong>❌ Error:</strong> ${error.message}
+                    </div>
+                    <button onclick="updatePackages()">Retry</button>
+                `;
+            }
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+        }
+
+        function hideStatus() {
+            document.getElementById('status').style.display = 'none';
+        }
+
+        async function fetchTranscript() {
+            const url = document.getElementById('youtubeUrl').value.trim();
+            if (!url) {
+                showStatus('Please enter a YouTube URL', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('fetchBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Fetching...';
+            showStatus('Fetching transcript...', 'loading');
+
+            try {
+                const response = await fetch('/api/transcript', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    currentTranscript = data.transcript;
+                    showStatus('Transcript fetched successfully!', 'success');
+                    document.getElementById('contentSection').classList.add('active');
+                    document.getElementById('chatMessages').innerHTML = '';
+                    document.getElementById('summarySection').style.display = 'none';
+                    document.getElementById('chatMode').textContent = '(Transcript Mode)';
+                    document.getElementById('chatInput').placeholder = 'Ask a question about the transcript...';
+                } else {
+                    showStatus(data.error || 'Failed to fetch transcript', 'error');
+                }
+            } catch (error) {
+                showStatus('Error: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Get Transcript';
+            }
+        }
+
+        function generateSummary() {
+            if (!currentTranscript) {
+                showStatus('Please fetch a transcript first', 'error');
+                return;
+            }
+
+            const model = document.getElementById('modelSelect').value;
+            const summaryDiv = document.getElementById('summary');
+            const summarySection = document.getElementById('summarySection');
+            const btn = document.getElementById('summaryBtn');
+
+            btn.disabled = true;
+            summaryDiv.innerHTML = '<span class="streaming-cursor"></span>';
+            summarySection.style.display = 'block';
+            showStatus('Generating summary...', 'loading');
+
+            // Close any existing connection
+            if (currentEventSource) {
+                currentEventSource.close();
+            }
+
+            // Create EventSource for streaming
+            const params = new URLSearchParams({
+                transcript: currentTranscript,
+                model: model
+            });
+
+            // Get custom prompt
+            const customPrompt = document.getElementById('summaryPrompt').value;
+
+            // Use fetch with streaming
+            fetch('/api/summarize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transcript: currentTranscript, model: model, prompt_template: customPrompt })
+            }).then(response => {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                function processStream() {
+                    reader.read().then(({ done, value }) => {
+                        if (done) {
+                            btn.disabled = false;
+                            hideStatus();
+                            return;
+                        }
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop(); // Keep incomplete line in buffer
+
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.substring(6));
+
+                                    if (data.type === 'token') {
+                                        summaryDiv.textContent += data.content;
+                                        summaryDiv.innerHTML += '<span class="streaming-cursor"></span>';
+                                        summaryDiv.scrollTop = summaryDiv.scrollHeight;
+                                    } else if (data.type === 'done') {
+                                        // Remove cursor
+                                        const cursor = summaryDiv.querySelector('.streaming-cursor');
+                                        if (cursor) cursor.remove();
+                                        showStatus('Summary complete!', 'success');
+                                        btn.disabled = false;
+                                        return;
+                                    } else if (data.type === 'error') {
+                                        showStatus(data.content, 'error');
+                                        btn.disabled = false;
+                                        return;
+                                    }
+                                } catch (e) {
+                                    console.error('Parse error:', e);
+                                }
+                            }
+                        }
+
+                        processStream();
+                    });
+                }
+
+                processStream();
+            }).catch(error => {
+                showStatus('Error: ' + error.message, 'error');
+                btn.disabled = false;
+            });
+        }
+
+        function sendChat() {
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Add user message to chat
+            addMessage(message, 'user');
+            input.value = '';
+
+            const model = document.getElementById('modelSelect').value;
+            const btn = document.getElementById('chatBtn');
+            btn.disabled = true;
+
+            // Create placeholder for assistant response
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+            messageDiv.innerHTML = '<span class="streaming-cursor"></span>';
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+            let thinkingDiv = null;
+            let responseText = '';
+            let thinkingText = '';
+
+            showStatus('Thinking...', 'loading');
+
+            // Get custom prompts
+            const chatTranscriptPrompt = document.getElementById('chatTranscriptPrompt').value;
+            const chatGeneralPrompt = document.getElementById('chatGeneralPrompt').value;
+
+            // Use fetch with streaming
+            fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    model: model,
+                    transcript_prompt_template: chatTranscriptPrompt,
+                    general_prompt_template: chatGeneralPrompt
+                })
+            }).then(response => {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                function processStream() {
+                    reader.read().then(({ done, value }) => {
+                        if (done) {
+                            btn.disabled = false;
+                            hideStatus();
+                            return;
+                        }
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop();
+
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.substring(6));
+
+                                    if (data.type === 'thinking_start') {
+                                        thinkingDiv = document.createElement('div');
+                                        thinkingDiv.className = 'thinking-section';
+                                        thinkingDiv.innerHTML = '<div class="thinking-header">💭 Thinking...</div><div class="thinking-content"></div>';
+                                        const cursor = messageDiv.querySelector('.streaming-cursor');
+                                        if (cursor) cursor.remove();
+                                        messageDiv.appendChild(thinkingDiv);
+                                        messageDiv.innerHTML += '<span class="streaming-cursor"></span>';
+                                    } else if (data.type === 'thinking') {
+                                        thinkingText += data.content;
+                                        if (thinkingDiv) {
+                                            const contentDiv = thinkingDiv.querySelector('.thinking-content');
+                                            if (contentDiv) {
+                                                contentDiv.textContent = thinkingText;
+                                            }
+                                        }
+                                    } else if (data.type === 'thinking_end') {
+                                        if (thinkingDiv) {
+                                            const header = thinkingDiv.querySelector('.thinking-header');
+                                            if (header) {
+                                                header.textContent = '💭 Reasoning:';
+                                            }
+                                        }
+                                    } else if (data.type === 'token') {
+                                        responseText += data.content;
+                                        const cursor = messageDiv.querySelector('.streaming-cursor');
+                                        if (cursor) {
+                                            cursor.remove();
+                                        }
+
+                                        // Update content without losing thinking section
+                                        const thinkingHTML = thinkingDiv ? thinkingDiv.outerHTML : '';
+                                        messageDiv.innerHTML = thinkingHTML + responseText + '<span class="streaming-cursor"></span>';
+
+                                        // Re-get thinking div reference since innerHTML was replaced
+                                        if (thinkingDiv) {
+                                            thinkingDiv = messageDiv.querySelector('.thinking-section');
+                                        }
+
+                                        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                                    } else if (data.type === 'done') {
+                                        const cursor = messageDiv.querySelector('.streaming-cursor');
+                                        if (cursor) cursor.remove();
+                                        hideStatus();
+                                        btn.disabled = false;
+                                        return;
+                                    } else if (data.type === 'error') {
+                                        showStatus(data.content, 'error');
+                                        btn.disabled = false;
+                                        return;
+                                    }
+                                } catch (e) {
+                                    console.error('Parse error:', e);
+                                }
+                            }
+                        }
+
+                        processStream();
+                    });
+                }
+
+                processStream();
+            }).catch(error => {
+                showStatus('Error: ' + error.message, 'error');
+                btn.disabled = false;
+            });
+        }
+
+        function addMessage(text, sender) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}`;
+            messageDiv.textContent = text;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function downloadTranscript() {
+            window.location.href = '/api/download';
+        }
+
+        // Allow Enter key for inputs
+        document.getElementById('youtubeUrl').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') fetchTranscript();
+        });
+
+        document.getElementById('chatInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendChat();
+        });
+
+        // Load models and check for updates on page load
+        loadModels();
+        checkForUpdates();
+    </script>
+</body>
+</html>
