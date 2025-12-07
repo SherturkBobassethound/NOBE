@@ -635,6 +635,10 @@ Answer:`
             // Get custom prompt
             const customPrompt = document.getElementById('summaryPrompt').value;
 
+            let thinkingDiv = null;
+            let summaryText = '';
+            let thinkingText = '';
+
             // Use fetch with streaming
             fetch('/api/summarize', {
                 method: 'POST',
@@ -662,9 +666,37 @@ Answer:`
                                 try {
                                     const data = JSON.parse(line.substring(6));
 
-                                    if (data.type === 'token') {
-                                        summaryDiv.textContent += data.content;
-                                        summaryDiv.innerHTML += '<span class="streaming-cursor"></span>';
+                                    if (data.type === 'thinking_start') {
+                                        summaryDiv.innerHTML = '<div class="thinking-section"><div class="thinking-header">💭 Thinking...</div><div class="thinking-content"></div></div><span class="streaming-cursor"></span>';
+                                        thinkingDiv = summaryDiv.querySelector('.thinking-section');
+                                    } else if (data.type === 'thinking') {
+                                        thinkingText += data.content;
+                                        const contentDiv = summaryDiv.querySelector('.thinking-content');
+                                        if (contentDiv) {
+                                            contentDiv.textContent = thinkingText;
+                                        }
+                                        summaryDiv.scrollTop = summaryDiv.scrollHeight;
+                                    } else if (data.type === 'thinking_end') {
+                                        if (thinkingDiv) {
+                                            const header = thinkingDiv.querySelector('.thinking-header');
+                                            if (header) {
+                                                header.textContent = '💭 Reasoning:';
+                                            }
+                                        }
+                                    } else if (data.type === 'token') {
+                                        summaryText += data.content;
+                                        const cursor = summaryDiv.querySelector('.streaming-cursor');
+                                        if (cursor) cursor.remove();
+
+                                        // Update content without losing thinking section
+                                        const thinkingHTML = thinkingDiv ? thinkingDiv.outerHTML : '';
+                                        summaryDiv.innerHTML = thinkingHTML + summaryText + '<span class="streaming-cursor"></span>';
+
+                                        // Re-get thinking div reference since innerHTML was replaced
+                                        if (thinkingDiv) {
+                                            thinkingDiv = summaryDiv.querySelector('.thinking-section');
+                                        }
+
                                         summaryDiv.scrollTop = summaryDiv.scrollHeight;
                                     } else if (data.type === 'done') {
                                         // Remove cursor
@@ -760,27 +792,19 @@ Answer:`
                                     const data = JSON.parse(line.substring(6));
 
                                     if (data.type === 'thinking_start') {
-                                        thinkingDiv = document.createElement('div');
-                                        thinkingDiv.className = 'thinking-section';
-                                        thinkingDiv.innerHTML = '<div class="thinking-header">💭 Thinking...</div><div class="thinking-content"></div>';
-                                        const cursor = messageDiv.querySelector('.streaming-cursor');
-                                        if (cursor) cursor.remove();
-                                        messageDiv.appendChild(thinkingDiv);
-                                        messageDiv.innerHTML += '<span class="streaming-cursor"></span>';
+                                        messageDiv.innerHTML = '<div class="thinking-section"><div class="thinking-header">💭 Thinking...</div><div class="thinking-content"></div></div><span class="streaming-cursor"></span>';
+                                        thinkingDiv = messageDiv.querySelector('.thinking-section');
                                     } else if (data.type === 'thinking') {
                                         thinkingText += data.content;
-                                        if (thinkingDiv) {
-                                            const contentDiv = thinkingDiv.querySelector('.thinking-content');
-                                            if (contentDiv) {
-                                                contentDiv.textContent = thinkingText;
-                                            }
+                                        const contentDiv = messageDiv.querySelector('.thinking-content');
+                                        if (contentDiv) {
+                                            contentDiv.textContent = thinkingText;
                                         }
+                                        messagesDiv.scrollTop = messagesDiv.scrollHeight;
                                     } else if (data.type === 'thinking_end') {
-                                        if (thinkingDiv) {
-                                            const header = thinkingDiv.querySelector('.thinking-header');
-                                            if (header) {
-                                                header.textContent = '💭 Reasoning:';
-                                            }
+                                        const header = messageDiv.querySelector('.thinking-header');
+                                        if (header) {
+                                            header.textContent = '💭 Reasoning:';
                                         }
                                     } else if (data.type === 'token') {
                                         responseText += data.content;

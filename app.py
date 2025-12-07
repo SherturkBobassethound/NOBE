@@ -194,16 +194,34 @@ Summary:"""
             )
 
             if response.status_code == 200:
+                has_sent_thinking_start = False
+                thinking_mode = False
+
                 for line in response.iter_lines():
                     if line:
                         chunk = json.loads(line)
 
-                        # Send the response token
-                        if 'response' in chunk:
+                        # Check for thinking field (deepseek-r1 style)
+                        if 'thinking' in chunk and chunk['thinking']:
+                            if not has_sent_thinking_start:
+                                yield f"data: {json.dumps({'type': 'thinking_start'})}\n\n"
+                                has_sent_thinking_start = True
+                                thinking_mode = True
+
+                            yield f"data: {json.dumps({'type': 'thinking', 'content': chunk['thinking']})}\n\n"
+
+                        # Regular response
+                        if 'response' in chunk and chunk['response']:
+                            # If we were in thinking mode, end it now
+                            if thinking_mode:
+                                yield f"data: {json.dumps({'type': 'thinking_end'})}\n\n"
+                                thinking_mode = False
+
                             yield f"data: {json.dumps({'type': 'token', 'content': chunk['response']})}\n\n"
 
-                        # Check if done
                         if chunk.get('done', False):
+                            if thinking_mode:
+                                yield f"data: {json.dumps({'type': 'thinking_end'})}\n\n"
                             yield f"data: {json.dumps({'type': 'done'})}\n\n"
                             break
             else:
@@ -286,7 +304,7 @@ Answer:"""
 
                         # Regular response
                         if 'response' in chunk and chunk['response']:
-                            # If we were in thinking mode and now getting response, send thinking_end
+                            # If we were in thinking mode, end it now
                             if thinking_mode:
                                 yield f"data: {json.dumps({'type': 'thinking_end'})}\n\n"
                                 thinking_mode = False
