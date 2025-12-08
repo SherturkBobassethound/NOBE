@@ -522,7 +522,9 @@ Answer:`
 
             try {
                 const response = await fetch('/api/update-packages', {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true })
                 });
 
                 const data = await response.json();

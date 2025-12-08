@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
+from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context, session
 from youtube_transcript_api import YouTubeTranscriptApi
 import requests
 import re
@@ -6,13 +6,12 @@ import io
 import json
 import subprocess
 import sys
+import os
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
 
-# Store transcript in memory (for chat context)
-current_transcript = {"text": "", "video_id": ""}
-
-# Store update status
+# Store update status (this is global/shared, which is fine for updates)
 update_status = {"has_updates": False, "updates": []}
 
 def extract_video_id(url):
@@ -60,13 +59,70 @@ def check_for_updates():
 def get_ollama_models():
     """Get list of available Ollama models"""
     try:
-        response = requests.get('http://localhost:11434/api/tags')
+        response = requests.get('http://localhost:11434/api/tags', timeout=5)
         if response.status_code == 200:
             models = response.json().get('models', [])
             return [model['name'] for model in models]
         return ['qwen2.5:latest']
-    except:
+    except (requests.RequestException, ValueError, KeyError) as e:
+        print(f"Failed to fetch Ollama models: {e}")
         return ['qwen2.5:latest']
+
+
+def stream_ollama_response(prompt, model):
+    """
+    Shared streaming generator for Ollama responses.
+    Handles thinking/reasoning display for models like deepseek-r1.
+    """
+    try:
+        response = requests.post(
+            'http://localhost:11434/api/generate',
+            json={
+                'model': model,
+                'prompt': prompt,
+                'stream': True
+            },
+            stream=True,
+            timeout=None  # No timeout - streaming handles this
+        )
+
+        if response.status_code == 200:
+            has_sent_thinking_start = False
+            thinking_mode = False
+
+            for line in response.iter_lines():
+                if line:
+                    chunk = json.loads(line)
+
+                    # Check for thinking field (deepseek-r1 style)
+                    if 'thinking' in chunk and chunk['thinking']:
+                        if not has_sent_thinking_start:
+                            yield f"data: {json.dumps({'type': 'thinking_start'})}\n\n"
+                            has_sent_thinking_start = True
+                            thinking_mode = True
+
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': chunk['thinking']})}\n\n"
+
+                    # Regular response
+                    if 'response' in chunk and chunk['response']:
+                        # If we were in thinking mode, end it now
+                        if thinking_mode:
+                            yield f"data: {json.dumps({'type': 'thinking_end'})}\n\n"
+                            thinking_mode = False
+
+                        yield f"data: {json.dumps({'type': 'token', 'content': chunk['response']})}\n\n"
+
+                    if chunk.get('done', False):
+                        if thinking_mode:
+                            yield f"data: {json.dumps({'type': 'thinking_end'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                        break
+        else:
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Ollama request failed'})}\n\n"
+    except requests.exceptions.ConnectionError:
+        yield f"data: {json.dumps({'type': 'error', 'content': 'Cannot connect to Ollama. Make sure Ollama is running.'})}\n\n"
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 
 @app.route('/')
 def index():
@@ -85,8 +141,18 @@ def get_updates():
 
 @app.route('/api/update-packages', methods=['POST'])
 def update_packages():
-    """Update outdated packages"""
+    """Update outdated packages (restricted to localhost only)"""
     global update_status
+
+    # Security: Only allow updates from localhost
+    if request.remote_addr not in ('127.0.0.1', '::1', 'localhost'):
+        return jsonify({'success': False, 'message': 'Updates can only be performed from localhost'}), 403
+
+    # Require confirmation token to prevent accidental updates
+    data = request.json or {}
+    if not data.get('confirm'):
+        return jsonify({'success': False, 'message': 'Confirmation required'}), 400
+
     try:
         packages_to_update = [pkg['name'] for pkg in update_status.get('updates', [])]
 
@@ -114,14 +180,14 @@ def update_packages():
                 'success': False,
                 'message': f'Update failed: {result.stderr}'
             }), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'message': 'Update timed out'}), 500
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/transcript', methods=['POST'])
 def get_transcript():
     """Fetch YouTube transcript"""
-    global current_transcript
-
     data = request.json
     url = data.get('url', '')
 
@@ -137,8 +203,8 @@ def get_transcript():
         # Extract text from snippets
         transcript_text = ' '.join([snippet.text for snippet in result.snippets])
 
-        # Store for chat context
-        current_transcript = {
+        # Store in session for user isolation (each user gets their own transcript)
+        session['transcript'] = {
             "text": transcript_text,
             "video_id": video_id,
             "language": result.language,
@@ -180,64 +246,11 @@ def summarize():
 
 Summary:"""
 
-    def generate():
-        try:
-            response = requests.post(
-                'http://localhost:11434/api/generate',
-                json={
-                    'model': model,
-                    'prompt': prompt,
-                    'stream': True
-                },
-                stream=True,
-                timeout=None  # No timeout - streaming handles this
-            )
-
-            if response.status_code == 200:
-                has_sent_thinking_start = False
-                thinking_mode = False
-
-                for line in response.iter_lines():
-                    if line:
-                        chunk = json.loads(line)
-
-                        # Check for thinking field (deepseek-r1 style)
-                        if 'thinking' in chunk and chunk['thinking']:
-                            if not has_sent_thinking_start:
-                                yield f"data: {json.dumps({'type': 'thinking_start'})}\n\n"
-                                has_sent_thinking_start = True
-                                thinking_mode = True
-
-                            yield f"data: {json.dumps({'type': 'thinking', 'content': chunk['thinking']})}\n\n"
-
-                        # Regular response
-                        if 'response' in chunk and chunk['response']:
-                            # If we were in thinking mode, end it now
-                            if thinking_mode:
-                                yield f"data: {json.dumps({'type': 'thinking_end'})}\n\n"
-                                thinking_mode = False
-
-                            yield f"data: {json.dumps({'type': 'token', 'content': chunk['response']})}\n\n"
-
-                        if chunk.get('done', False):
-                            if thinking_mode:
-                                yield f"data: {json.dumps({'type': 'thinking_end'})}\n\n"
-                            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                            break
-            else:
-                yield f"data: {json.dumps({'type': 'error', 'content': 'Ollama request failed'})}\n\n"
-        except requests.exceptions.ConnectionError:
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Cannot connect to Ollama'})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-
-    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+    return Response(stream_with_context(stream_ollama_response(prompt, model)), mimetype='text/event-stream')
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
     """Chat with Ollama with streaming (works with or without transcript)"""
-    global current_transcript
-
     data = request.json
     message = data.get('message', '')
     model = data.get('model', 'qwen2.5:latest')
@@ -246,6 +259,9 @@ def chat():
 
     if not message:
         return jsonify({'error': 'No message provided'}), 400
+
+    # Get transcript from session (user-isolated)
+    current_transcript = session.get('transcript', {})
 
     # Check if we have a transcript - if yes, use transcript mode
     if current_transcript.get('text'):
@@ -272,63 +288,12 @@ Answer:"""
 
 Answer:"""
 
-    def generate():
-        try:
-            response = requests.post(
-                'http://localhost:11434/api/generate',
-                json={
-                    'model': model,
-                    'prompt': prompt,
-                    'stream': True
-                },
-                stream=True,
-                timeout=None  # No timeout - streaming handles this
-            )
-
-            if response.status_code == 200:
-                has_sent_thinking_start = False
-                thinking_mode = False
-
-                for line in response.iter_lines():
-                    if line:
-                        chunk = json.loads(line)
-
-                        # Check for thinking field (deepseek-r1 style)
-                        if 'thinking' in chunk and chunk['thinking']:
-                            if not has_sent_thinking_start:
-                                yield f"data: {json.dumps({'type': 'thinking_start'})}\n\n"
-                                has_sent_thinking_start = True
-                                thinking_mode = True
-
-                            yield f"data: {json.dumps({'type': 'thinking', 'content': chunk['thinking']})}\n\n"
-
-                        # Regular response
-                        if 'response' in chunk and chunk['response']:
-                            # If we were in thinking mode, end it now
-                            if thinking_mode:
-                                yield f"data: {json.dumps({'type': 'thinking_end'})}\n\n"
-                                thinking_mode = False
-
-                            yield f"data: {json.dumps({'type': 'token', 'content': chunk['response']})}\n\n"
-
-                        if chunk.get('done', False):
-                            if thinking_mode:
-                                yield f"data: {json.dumps({'type': 'thinking_end'})}\n\n"
-                            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                            break
-            else:
-                yield f"data: {json.dumps({'type': 'error', 'content': 'Ollama request failed'})}\n\n"
-        except requests.exceptions.ConnectionError:
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Cannot connect to Ollama'})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-
-    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+    return Response(stream_with_context(stream_ollama_response(prompt, model)), mimetype='text/event-stream')
 
 @app.route('/api/download', methods=['GET'])
 def download_transcript():
     """Download transcript as text file"""
-    global current_transcript
+    current_transcript = session.get('transcript', {})
 
     if not current_transcript.get('text'):
         return jsonify({'error': 'No transcript available'}), 400
